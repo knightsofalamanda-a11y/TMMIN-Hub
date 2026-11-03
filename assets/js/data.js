@@ -21,6 +21,7 @@ const ICONS = {
   ladder: '<svg viewBox="0 0 24 24"><path d="M7 3v18M17 3v18M7 7h10M7 12h10M7 17h10"/></svg>',
   quiz: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .8-1 1.5v.7M12 17h.01"/></svg>',
   log: '<svg viewBox="0 0 24 24"><path d="M4 4h16v16H4z"/><path d="M8 9h8M8 13h8M8 17h5"/></svg>',
+  refresh: '<svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 0 0-14.6-4.5L4 8"/><path d="M4 3v5h5"/><path d="M4 13a8 8 0 0 0 14.6 4.5L20 16"/><path d="M20 21v-5h-5"/></svg>',
   home: '<svg viewBox="0 0 24 24"><path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/></svg>'
 };
 
@@ -76,8 +77,8 @@ const MILESTONES = [
 /* Swimlane steps. col = phase index (0-based). paths = severities that pass through the step. */
 const STEPS = [
   { id: 'P1', lane: 'platform', col: 0, title: 'Detect and alert', paths: ['S1','S2','S3','S4'],
-    desc: 'Sensors, SCADA limits, or AI vision flag the abnormality. The alert appears on the station screen and the Team Leader watch. The response clock starts.',
-    out: 'Alert code and timestamp' },
+    desc: 'Solution 1 (AI integrated with SCADA) detects a defect or abnormality, for example a sealer gap from AI vision or a weld current outside its limit. It sends an alert code to the station screen and the Team Leader watch, and the response clock starts. From here, Solution 2 takes over.',
+    out: 'Alert code and timestamp from Solution 1' },
   { id: 'O1', lane: 'operator', col: 0, title: 'Notice and pull Andon', paths: ['S1','S2','S3','S4'],
     desc: 'If the operator sees it first, pull the Andon cord or press the station button. Manual detection starts the same clock.',
     out: 'Andon call' },
@@ -123,9 +124,9 @@ const STEPS = [
   { id: 'P3', lane: 'platform', col: 7, title: 'Log and analyze', paths: ['S1','S2','S3','S4'],
     desc: 'Response times, causes, and labels feed the dashboard: time to acknowledge, time to restore, repeat abnormalities, and false alarm rate.',
     out: 'Response KPIs' },
-  { id: 'G2', lane: 'gl', col: 7, title: 'Countermeasure and update tutorial', paths: ['S1','S2','S3','S4'],
-    desc: 'Record the permanent countermeasure. If the tutorial missed something, update it so the next shift learns from this case.',
-    out: 'Updated tutorial' },
+  { id: 'G2', lane: 'gl', col: 7, title: 'Countermeasure and update manual book', paths: ['S1','S2','S3','S4'],
+    desc: 'Record the permanent countermeasure. If the manual book missed something, update the tutorial so the next shift learns from this case. Line changes validated in Solution 3 simulation also update the manual book here.',
+    out: 'Updated manual book' },
   { id: 'M2', lane: 'mgmt', col: 7, title: 'Weekly review', paths: ['S1','S2'],
     desc: 'Review breaches and repeat cases, approve countermeasures that need budget, and track the response KPIs.',
     out: 'Approved countermeasures' }
@@ -133,48 +134,114 @@ const STEPS = [
 
 /* Abnormality tutorial library */
 const LIBRARY = [
-  { code: 'EQ', name: 'Equipment stop or breakdown', sev: 'S1 or S2', lanes: ['operator','tl','support'],
+  { code: 'EQ', ver: '1.0', upd: null, name: 'Equipment stop or breakdown', sev: 'S1 or S2', lanes: ['operator','tl','support'],
     summary: 'A machine, robot, jig, or conveyor stops, faults, or behaves abnormally.',
     signs: ['Robot or PLC fault code on the HMI', 'Conveyor stops or runs at the wrong speed', 'Unusual noise, smell, smoke, or vibration', 'Repeated small stops at the same station'],
     dos: ['Press the station stop if anything moves unsafely', 'Acknowledge the alert and note the fault code', 'Keep the area as it is for the technician', 'Move people away from moving parts'],
     donts: ['Do not reset a fault more than once without the TL', 'Do not reach into a cell that is not locked out', 'Do not bypass interlocks or light curtains'],
     steps: [['Make it safe', 'Stop the station. If there is smoke, sparks, or a leak, treat it as S1 and call the Group Leader at once.'], ['Acknowledge', 'Tap the alert on the station screen. The Team Leader receives the fault code and the clock is visible to everyone.'], ['Record what you saw', 'Choose the closest symptom in the Hub form: stopped, slow, noise, or repeated stop. Add a photo if safe.'], ['Wait for the TL', 'The TL checks if the fault is in the standard reset list. Only listed faults may be reset by the TL.'], ['Hand over to Maintenance', 'If not in the reset list, Maintenance arrives within target, applies lockout, and repairs.'], ['Restart and check', 'Run one unit, check it against the standard, then resume normal running.']],
     call: 'Team Leader, then Maintenance through the Group Leader', example: 'Welding robot R3 stops with a servo fault code in the body welding area.' },
-  { code: 'QD', name: 'Quality defect', sev: 'S1 to S3', lanes: ['operator','tl','support'],
+  { code: 'QD', ver: '1.0', upd: null, name: 'Quality defect', sev: 'S1 to S3', lanes: ['operator','tl','support'],
     summary: 'A unit does not meet the quality standard: a missing or weak weld, sealer gap, dent, or dirt.',
     signs: ['AI vision flags a sealer gap or missing weld', 'Operator finds a defect during the check', 'Same defect on more than one unit', 'Downstream process returns a unit'],
     dos: ['Stop at the fixed position if the defect will pass on', 'Red tag the unit and hold the last good unit', 'Check the 3 units before and after', 'Take a photo of the defect'],
     donts: ['Do not let a suspect unit move on without a tag', 'Do not repair before the TL confirms the cause', 'Do not mix held and good units'],
     steps: [['Stop it moving on', 'If the unit will leave the station, stop at the fixed position. A defect that has already moved downstream is S1.'], ['Tag and hold', 'Put a red tag on the unit. Hold the last good unit as the reference.'], ['Check neighbours', 'Check the 3 units before and the 3 after. Two or more defects in one shift make it S2.'], ['TL confirms', 'The TL compares with the quality standard and confirms the severity in the platform.'], ['Quality decides', 'Quality decides release, rework, or scrap for every held unit.'], ['Close with cause', 'The TL closes the alert with the cause so the AI vision model learns.']],
     call: 'Team Leader, then Quality Inspector', example: 'AI vision detects a sealer bead gap on the roof joint of two units in one hour.' },
-  { code: 'MT', name: 'Material issue', sev: 'S2 or S3', lanes: ['operator','tl','gl'],
+  { code: 'MT', ver: '1.0', upd: null, name: 'Material issue', sev: 'S2 or S3', lanes: ['operator','tl','gl'],
     summary: 'A part is missing, wrong, damaged, or about to run out at the line side.',
     signs: ['Line-side stock below the minimum mark', 'Part number does not match the build sheet', 'Damaged packaging or parts', 'Kanban not replenished on time'],
     dos: ['Check the part number against the build sheet', 'Set wrong or damaged parts aside with a tag', 'Tell the TL how many units the stock can cover'],
     donts: ['Do not use a part that looks similar but has a different number', 'Do not take parts from another line without the TL'],
     steps: [['Confirm the gap', 'Check the part number and count the remaining stock. Note how many units it covers.'], ['Acknowledge and call', 'Acknowledge the alert. Less than 30 minutes of cover is S2.'], ['TL checks supply', 'The TL checks the platform for the delivery status and calls logistics.'], ['Protect the build', 'If a wrong part was fitted, treat it as a quality defect and follow the QD tutorial.'], ['Restore stock', 'Logistics refills. The operator confirms the right part number before use.']],
     call: 'Team Leader, then Logistics through the Group Leader', example: 'Wrong bracket variant delivered for the HEV model with 20 minutes of correct stock left.' },
-  { code: 'PR', name: 'Process parameter out of range', sev: 'S2 or S3', lanes: ['operator','tl','support'],
+  { code: 'PR', ver: '1.0', upd: null, name: 'Process parameter out of range', sev: 'S2 or S3', lanes: ['operator','tl','support'],
     summary: 'A process value goes outside its limit: weld current, torque, sealer pressure, or temperature.',
     signs: ['Parameter shown in amber or red on the screen', 'Trend moving toward the limit', 'Torque tool rejects a fastening', 'Sealer bead thinner than the sample'],
     dos: ['Acknowledge and note the value shown', 'Check if the last units were made outside the limit', 'Follow the parameter card for the allowed adjustment'],
     donts: ['Do not change a setting that is not on the parameter card', 'Do not ignore an amber warning that repeats'],
     steps: [['Read the value', 'Acknowledge the alert and note the value and the limit shown.'], ['Check recent units', 'If any unit was made outside the limit, hold it and follow the QD tutorial.'], ['Allowed adjustment', 'The TL may make the adjustment listed on the parameter card, then watch the next 3 units.'], ['Call Engineering', 'If it drifts again or is not on the card, Process Engineering is called. This becomes S2.'], ['Close and label', 'Close the alert with the cause so the drift pattern is used for prediction.']],
     call: 'Team Leader, then Process Engineering', example: 'Spot weld current drops below the lower limit on gun 4 for 3 consecutive units.' },
-  { code: 'SF', name: 'Safety', sev: 'Always S1 if people are at risk', lanes: ['operator','tl','gl','mgmt'],
+  { code: 'SF', ver: '1.0', upd: null, name: 'Safety', sev: 'Always S1 if people are at risk', lanes: ['operator','tl','gl','mgmt'],
     summary: 'Any situation that can injure people: contact with moving parts, fire, leak, electrical, or fall.',
     signs: ['Someone is hurt or nearly hurt', 'Smoke, fire, chemical, or oil leak', 'Guard, interlock, or light curtain not working', 'Blocked walkway or exit'],
     dos: ['Stop the line with the emergency stop', 'Move people to a safe place', 'Call the Group Leader at once', 'Give first aid only if trained'],
     donts: ['Do not restart until the Group Leader says it is safe', 'Do not move an injured person unless there is danger'],
     steps: [['Stop and protect', 'Use the emergency stop and keep people away from the hazard.'], ['Call', 'Pull Andon and call the Group Leader. Safety is always S1 when people are at risk.'], ['Secure the area', 'The GL secures the area and calls the safety officer.'], ['Report', 'A near miss with no contact is logged as S4 so the pattern is visible.'], ['Restart only when safe', 'The GL approves restart after the hazard is removed.']],
     call: 'Group Leader and safety officer at once', example: 'Light curtain at the sealer station does not stop the robot during a test.' },
-  { code: 'AI', name: 'System or AI alert', sev: 'S3 or S4', lanes: ['operator','tl','platform'],
+  { code: 'AI', ver: '1.0', upd: null, name: 'System or AI alert', sev: 'S3 or S4', lanes: ['operator','tl','platform'],
     summary: 'The platform raises an alert that looks wrong, a sensor stops sending data, or a screen freezes.',
     signs: ['Alert with no visible problem on the line', 'Sensor value frozen or missing', 'Screen or tablet not responding', 'Many alerts at the same time'],
     dos: ['Still acknowledge every alert', 'Check the line visually before judging it false', 'Label it as false alarm with a short reason'],
     donts: ['Do not ignore or mute alerts', 'Do not switch off a sensor or screen yourself'],
     steps: [['Acknowledge anyway', 'Every alert is acknowledged. An ignored alert is the problem this hub is built to remove.'], ['Look at the line', 'Check the station visually. If anything is abnormal, follow the matching tutorial instead.'], ['Label it', 'If nothing is wrong, label it as false alarm and choose a reason. This trains the AI.'], ['Report system faults', 'Frozen data or screens are reported to the TL, who logs it for the system team.'], ['Review', 'False alarms are reviewed in the daily meeting so thresholds can be tuned.']],
     call: 'Team Leader, then the platform team for system faults', example: 'AI vision flags a dent but the panel is clean. A reflection from new lighting is suspected.' }
+];
+
+/* How the three solutions connect */
+const SOLUTIONS = [
+  { n: 'Solution 1', name: 'AI integrated with SCADA', role: 'Detects' },
+  { n: 'Solution 2', name: 'Standardized Abnormality Response', role: 'Responds' },
+  { n: 'Solution 3', name: 'Digital twin simulation', role: 'Changes the line' }
+];
+
+/* ---------- Solution 1 → 2: alert stream ----------
+   Each template is one kind of detection the AI on SCADA data can raise.
+   sev = severity suggested by Solution 1; the Team Leader confirms it. */
+const AI_ALERT_TEMPLATES = [
+  { code: 'QD', src: 'AI vision', station: 'Sealer · roof rear joint', line: 'Sealer', msg: 'Sealer bead gap detected', metric: 'Gap 4.2 mm, limit 2.0 mm', conf: 94, sev: 'S2' },
+  { code: 'PR', src: 'SCADA limit', station: 'Body Welding 2 · gun 4', line: 'Body Welding 2', msg: 'Weld current below lower limit on 3 spots in a row', metric: '8.1 kA, window 8.5 to 10.5 kA', conf: 99, sev: 'S2' },
+  { code: 'EQ', src: 'Predictive AI', station: 'Body Welding 1 · robot R3', line: 'Body Welding 1', msg: 'Servo vibration trend predicts a fault within 2 hours', metric: '7.8 mm/s, alert at 7.0', conf: 81, sev: 'S3' },
+  { code: 'QD', src: 'AI vision', station: 'Paint · inspection booth', line: 'Paint', msg: 'Possible dent on left rear door', metric: 'Defect score 0.62', conf: 58, sev: 'S4' },
+  { code: 'MT', src: 'SCADA + kanban', station: 'Assembly 1 · line side', line: 'Assembly 1', msg: 'HEV bracket stock below minimum', metric: 'Covers 22 min of production', conf: 97, sev: 'S2' },
+  { code: 'SF', src: 'Safety PLC', station: 'Sealer · light curtain', line: 'Sealer', msg: 'Light curtain muting fault', metric: 'Interlock signal lost for 2.1 s', conf: 99, sev: 'S1' },
+  { code: 'AI', src: 'Platform health', station: 'Paint · camera 2', line: 'Paint', msg: 'Camera feed frozen, AI vision paused', metric: 'No frames for 45 s', conf: 100, sev: 'S3' },
+  { code: 'QD', src: 'AI vision', station: 'Body Welding 1 · underbody', line: 'Body Welding 1', msg: 'Spot weld missing on underbody panel', metric: '1 of 42 spots not found', conf: 91, sev: 'S1' }
+];
+
+/* ---------- Solution 3 → 2: line change packages ----------
+   A package arrives when Solution 3 has validated a line change in the digital twin.
+   changes are applied to the manual book when the package is published. */
+const PKG_STAGES = ['Received', 'Impact reviewed', 'Manual published', 'Refresher', 'Go-live released'];
+const PKG_BASE = [
+  { id: 'LC-034', title: 'Welding gun 4 moved for the BEV underbody variant', area: 'Body Welding 2', daysAgo: 0, stage: 0, people: 24, trained: 0,
+    sim: [['Cycle time', '58.0 s', '57.4 s'], ['Gun 4 reach', '92%', '100%'], ['Weld current window', '8.5 to 10.5 kA', '8.8 to 10.2 kA']],
+    note: 'Digital twin confirmed reach and cycle time. The new position needs a narrower weld current window.',
+    changes: [
+      { code: 'PR', type: 'step', idx: 2, title: 'Allowed adjustment', text: 'For gun 4 after LC-034, the allowed current window is 8.8 to 10.2 kA. The TL may adjust only inside this window, then watch the next 3 units.' },
+      { code: 'PR', type: 'sign', text: 'Gun 4 current near the new 8.8 kA lower limit' },
+      { code: 'EQ', type: 'step', idx: 4, title: 'Hand over to Maintenance', text: 'Maintenance checks the gun 4 position against the LC-034 jig drawing first, then applies lockout and repairs.' }
+    ] },
+  { id: 'LC-031', title: 'Sealer robot path changed for the new HEV roof variant', area: 'Sealer', daysAgo: 6, stage: 4, people: 24, trained: 24,
+    sim: [['Cycle time', '61.2 s', '60.5 s'], ['Bead length at rear corner', '100%', '96%']],
+    note: 'Digital twin showed a shorter bead at the rear corner under the new path, so a check point was added.',
+    changes: [
+      { code: 'QD', type: 'step', idx: 2, title: 'Check neighbours', text: 'Check the 3 units before and the 3 after, including the roof rear joint added in LC-031. Two or more defects in one shift make it S2.' },
+      { code: 'QD', type: 'sign', text: 'AI vision flags a short bead at the roof rear corner' }
+    ] },
+  { id: 'LC-028', title: 'Main conveyor speed raised for the higher production mix', area: 'Assembly 1', daysAgo: 14, stage: 4, people: 24, trained: 24,
+    sim: [['Line speed', '4.6 m/min', '5.0 m/min'], ['Buffer after a 3 min stop', 'OK', 'OK']],
+    note: 'Digital twin checked buffer stock and stop recovery at the new speed. Response targets stay the same.',
+    changes: [
+      { code: 'EQ', type: 'step', idx: 3, title: 'Wait for the TL', text: 'The TL checks if the fault is in the standard reset list. Since LC-028, conveyor overload and speed-sync faults are also on the list.' }
+    ] }
+];
+/* Packages Solution 3 can send next (demo) */
+const PKG_NEXT = [
+  { id: 'LC-036', title: 'Line-side buffer moved for the BEV battery tray', area: 'Assembly 1', people: 18,
+    sim: [['Walking distance per cycle', '14 m', '9 m'], ['Minimum stock cover', '30 min', '20 min']],
+    note: 'Digital twin shortened walking distance but reduced the safe stock cover to 20 minutes.',
+    changes: [
+      { code: 'MT', type: 'step', idx: 1, title: 'Acknowledge and call', text: 'Acknowledge the alert. For the BEV battery tray after LC-036, less than 20 minutes of cover is S2.' },
+      { code: 'MT', type: 'sign', text: 'Battery tray kanban card not returned within 10 minutes' }
+    ] },
+  { id: 'LC-037', title: 'Sealer nozzle changed to a wider type', area: 'Sealer', people: 20,
+    sim: [['Bead width', '6 mm', '8 mm'], ['Sealer use per unit', '410 g', '455 g']],
+    note: 'Digital twin validated coverage. The visual standard for a good bead changes.',
+    changes: [
+      { code: 'QD', type: 'step', idx: 3, title: 'TL confirms', text: 'The TL compares with the quality standard (8 mm bead after LC-037) and confirms the severity in the platform.' },
+      { code: 'PR', type: 'sign', text: 'Sealer pressure below the new nozzle setting' }
+    ] }
 ];
 
 /* Severity check: answer in order, first yes decides */

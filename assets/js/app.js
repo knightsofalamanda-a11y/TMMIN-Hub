@@ -28,9 +28,11 @@ let LOG = store.get('log', null) || seedLog();
 const PAGES_DEF = [
   ['home', 'Overview', 'home'],
   ['swimlane', 'SOP Swimlane', 'flow'],
-  ['library', 'Abnormality Tutorials', 'book'],
+  ['library', 'Manual Book', 'book'],
   ['severity', 'Severity & Response Targets', 'clock'],
-  ['simulator', 'Response Simulator', 'play'],
+  ['alerts', 'Live Alerts (S1)', 'alert'],
+  ['sync', 'Line Change Sync (S3)', 'refresh'],
+  ['simulator', 'Response Workspace', 'play'],
   ['training', 'Training & Quiz', 'quiz'],
   ['log', 'Response Log & KPIs', 'log']
 ];
@@ -48,10 +50,10 @@ function renderLanding() {
       <div class="hero-sub">One standard way to respond when something goes wrong on the line</div>
       <div class="hero-points">
         <span>${ico('flow')} Swimlane SOP for every role</span>
-        <span>${ico('book')} Step-by-step tutorials per abnormality</span>
+        <span>${ico('book')} Manual book tutorial per alert code</span>
         <span>${ico('clock')} Response targets by severity</span>
       </div>
-      <span class="pill">Solution 2 prototype · connected to the Integrated Smart Factory Platform</span>
+      <span class="pill">Solution 2 · receives alerts from Solution 1 (AI + SCADA) · manual book updated by Solution 3 (digital twin)</span>
     </div></div>
     <div class="land-inner land-body">
       <div class="select"><div><h1>Who are you on the line?</h1><p>The hub highlights your lane in the SOP, your tutorials, and your response targets.</p></div><span class="badge b-blue">Demo prototype</span></div>
@@ -80,7 +82,8 @@ function enter(role) {
       <div class="brand"><div class="brand-mark">AR</div><div>Abnormality Response Hub<span class="brand-sub">PT Toyota Motor Manufacturing Indonesia</span></div></div>
       <div class="side-role"><div class="ric sm">${ICONS[role]}</div><div>${h(r.name)}</div></div>
       <nav class="nav"><div class="nav-label">Response guide</div>${PAGES_DEF.slice(0, 4).map(navLink).join('')}
-        <div class="nav-label">Practice and monitor</div>${PAGES_DEF.slice(4).map(navLink).join('')}</nav>
+        <div class="nav-label">Connected solutions</div>${PAGES_DEF.slice(4, 6).map(navLink).join('')}
+        <div class="nav-label">Respond, train, monitor</div>${PAGES_DEF.slice(6).map(navLink).join('')}</nav>
       <div class="side-foot">Part of the Integrated Smart Factory Platform<br><a href="#" onclick="resetDemo();return false">Reset demo data</a></div>
     </aside>
     <div>
@@ -94,7 +97,7 @@ function enter(role) {
   const want = (location.hash || '').replace('#', '');
   go(PAGES_DEF.some(p => p[0] === want) ? want : 'home');
 }
-function navLink(p) { return `<a data-p="${p[0]}" href="#${p[0]}" onclick="go('${p[0]}');return true">${ico(p[2])}<span>${p[1]}</span></a>`; }
+function navLink(p) { return `<a data-p="${p[0]}" href="#${p[0]}" onclick="go('${p[0]}');return true">${ico(p[2])}<span>${p[1]}</span><span class="nav-badge" id="nb-${p[0]}"></span></a>`; }
 
 function go(p, keep) {
   if (p !== 'simulator') stopTimer();
@@ -110,7 +113,7 @@ function go(p, keep) {
   window.scrollTo(0, keep ? y : 0);
 }
 function refresh() { go(PAGE, true); }
-function resetDemo() { store.clear(); LOG = seedLog(); STATE.sim = null; STATE.libDone = {}; STATE.quizAns = []; STATE.quizI = 0; toast('Demo data reset'); enter(ROLE); }
+function resetDemo() { store.clear(); LOG = seedLog(); initInteg(); STATE.sim = null; STATE.libDone = {}; STATE.quizAns = []; STATE.quizI = 0; toast('Demo data reset'); enter(ROLE); }
 
 /* ---------- Shared bits ---------- */
 const card = (title, body, right) => `<div class="card"><div class="card-h"><h3>${title}</h3>${right || ''}</div><div class="card-b">${body}</div></div>`;
@@ -133,8 +136,8 @@ const PAGES = {};
 PAGES.home = () => {
   const r = LANES[ROLE], s = stats();
   const mine = STEPS.filter(x => x.lane === ROLE).sort((a, b) => a.col - b.col);
-  return pageHead('Your response guide', h(r.focus)) +
-  `<div class="grid g4">${kpi('Open abnormalities', s.open, 'Across all lines (simulated)')}${kpi('Avg time to acknowledge', s.mtta.toFixed(1) + ' min', 'Target 1 to 5 min by severity')}${kpi('Responses within target', Math.round(s.within) + '%', 'Closed cases, last 7 days')}${kpi('Tutorials available', LIBRARY.length + ' types', 'Linked to alert codes')}</div>
+  return pageHead('Your response guide', h(r.focus)) + solutionsCard() +
+  `<div class="grid g4">${kpi('Open abnormalities', s.open, 'Across all lines (simulated)')}${kpi('Avg time to acknowledge', s.mtta.toFixed(1) + ' min', 'Target 1 to 5 min by severity')}${kpi('Responses within target', Math.round(s.within) + '%', 'Closed cases, last 7 days')}${kpi('Manual book pages', LIBRARY.length + ' types', 'One per alert code')}</div>
   <div class="grid g21">
     ${card('What the hub fixes', `<div class="flow-mini">
         <div><span class="n">Today</span><b>Alerts often ignored</b>31% of operators often ignore automated alerts, so abnormalities wait.</div>
@@ -150,6 +153,24 @@ PAGES.home = () => {
   ${card('How a response works', `<div class="flow-mini">${PHASES.map((p, i) => `<div><span class="n">Step ${i + 1}</span><b>${p}</b>${h(STEPS.filter(x => x.col === i && !x.track).map(x => LANES[x.lane].short + ': ' + x.title).slice(0, 2).join(' · '))}</div>`).join('')}</div>`)}
 `;
 };
+
+function solutionsCard() {
+  const newA = ALERTS.filter(x => x.status === 'New').length, late = ALERTS.filter(x => x.status === 'New' && ageMin(x) > SEVERITY[x.sev].t.ack).length;
+  const pend = PKGS.filter(x => x.stage < 4);
+  return card('Connected solutions', `<div class="sol-grid">
+    <div class="sol"><span class="n">Solution 1 · Detects</span><b>AI integrated with SCADA</b>
+      <span class="small">${newA} new alert${newA === 1 ? '' : 's'} waiting${late ? ` · <span style="color:var(--crit);font-weight:600">${late} past target</span>` : ''}</span>
+      <a class="btn sm primary" href="#alerts" onclick="go('alerts')">Open Live Alerts</a></div>
+    <div class="sol-arrow" aria-hidden="true"><span>alert code</span>→</div>
+    <div class="sol me"><span class="n">Solution 2 · Responds</span><b>Standardized Abnormality Response</b>
+      <span class="small">SOP path, manual book, and targets open from the alert code</span>
+      <a class="btn sm" href="#simulator" onclick="go('simulator')">Response Workspace</a></div>
+    <div class="sol-arrow" aria-hidden="true"><span>line change</span>←</div>
+    <div class="sol"><span class="n">Solution 3 · Changes the line</span><b>Digital twin simulation</b>
+      <span class="small">${pend.length ? `${pend.length} package${pend.length === 1 ? '' : 's'} in progress: ${pend.map(x => x.id).join(', ')}` : 'All validated changes are in the manual book'}</span>
+      <a class="btn sm primary" href="#sync" onclick="go('sync')">Open Line Change Sync</a></div>
+  </div>`);
+}
 
 /* Swimlane */
 const EDGES = [
@@ -239,9 +260,9 @@ PAGES.library = () => {
       <span class="muted small">${h(x.summary)}</span><span class="small">Usual severity: <b>${h(x.sev)}</b></span></button>`).join('')}</div>
   <div class="grid g21">
     <div>
-      ${card(`<span class="code">${it.code}</span> ${h(it.name)}: step-by-step`, `<div class="tut">${it.steps.map((s, i) => `
+      ${card(`<span class="code">${it.code}</span> ${h(it.name)}: step-by-step`, `${verLine(it)}<div class="tut">${it.steps.map((s, i) => `
         <div class="ts ${done.includes(i) ? 'done' : ''} ${i === cur ? 'cur' : ''}" onclick="toggleStep('${it.code}',${i})" role="checkbox" aria-checked="${done.includes(i)}" tabindex="0" onkeydown="if(event.key===' '||event.key==='Enter'){event.preventDefault();toggleStep('${it.code}',${i})}">
-          <div class="tn">${done.includes(i) ? '✓' : i + 1}</div><div><div class="tt">${h(s[0])}</div><div class="td">${h(s[1])}</div></div></div>`).join('')}</div>
+          <div class="tn">${done.includes(i) ? '✓' : i + 1}</div><div><div class="tt">${h(s[0])}${it.changed && it.changed[i] ? ` <span class="badge b-blue">Updated · ${it.changed[i]}</span>` : ''}</div><div class="td">${h(s[1])}</div></div></div>`).join('')}</div>
         <div class="row mt"><span class="muted small">${done.length} of ${it.steps.length} steps checked</span><button class="btn sm" onclick="STATE.libDone['${it.code}']=[];refresh()">Clear</button><button class="btn sm primary" onclick="startSimFrom('${it.code}')">Practice this in the simulator</button></div>`)}
       <div class="do-dont">
         <div class="do"><h4>Do</h4><ul>${it.dos.map(x => `<li>${h(x)}</li>`).join('')}</ul></div>
@@ -256,6 +277,12 @@ PAGES.library = () => {
     </div>
   </div>`;
 };
+function verLine(it) {
+  const u = it.upd ? PKGS.find(x => x.id === it.upd) : null;
+  const pending = PKGS.filter(p => p.stage < 2 && p.changes.some(c => c.code === it.code));
+  return `<div class="ver"><span class="badge">Manual v${it.ver}</span>${u ? `<span class="small">Last update: <a href="#sync" onclick="STATE.pkgSel='${u.id}';go('sync')">${u.id}</a>, line change validated in Solution 3</span>` : '<span class="small muted">No changes since first release</span>'}
+    ${pending.map(p => `<span class="badge b-amber">Change pending: ${p.id}</span>`).join('')}</div>`;
+}
 function toggleStep(code, i) {
   const d = STATE.libDone[code] = STATE.libDone[code] || [];
   const k = d.indexOf(i); k >= 0 ? d.splice(k, 1) : d.push(i);
@@ -317,10 +344,11 @@ const clock = m => { const sec = Math.floor(m * 60); return String(Math.floor(se
 PAGES.simulator = () => {
   if (!STATE.sim) STATE.sim = newSim();
   const s = STATE.sim;
-  return pageHead('Response simulator', 'Run a practice abnormality and see whether each step meets its target. Use a faster clock to demo a full case.') +
+  const A = s.alert;
+  return pageHead(A ? 'Response workspace · live case ' + A.id : 'Response workspace · practice', A ? 'This case was opened from a Solution 1 alert. The clock started when the AI raised it.' : 'No live case open. Run a practice case, or open one from Live Alerts.', A ? '' : `<a class="btn sm primary" href="#alerts" onclick="go('alerts')">Open Live Alerts</a>`) +
   `<div class="grid g12">
     <div>
-      ${card('Set up the case', `
+      ${A ? alertEvidence(A, s) : card('Set up a practice case', `
         <div class="field"><label for="sCode">Abnormality type</label><select id="sCode" ${s.running || s.t ? 'disabled' : ''} onchange="STATE.sim.code=this.value">${LIBRARY.map(x => `<option value="${x.code}" ${x.code === s.code ? 'selected' : ''}>${x.code} · ${h(x.name)}</option>`).join('')}</select></div>
         <div class="field"><label for="sSev">Confirmed severity</label><select id="sSev" ${s.running || s.t ? 'disabled' : ''} onchange="STATE.sim.sev=this.value;refresh()">${Object.keys(SEVERITY).map(k => `<option value="${k}" ${k === s.sev ? 'selected' : ''}>${k} ${SEVERITY[k].name}</option>`).join('')}</select></div>
         <div class="field"><label for="sLine">Line</label><select id="sLine" ${s.running || s.t ? 'disabled' : ''} onchange="STATE.sim.line=this.value">${['Body Welding 1', 'Body Welding 2', 'Sealer', 'Paint', 'Assembly 1', 'Assembly 2'].map(x => `<option ${x === s.line ? 'selected' : ''}>${x}</option>`).join('')}</select></div>
@@ -330,10 +358,10 @@ PAGES.simulator = () => {
     </div>
     <div>
       ${card('Live response', `<div class="row" style="justify-content:space-between"><div><div class="muted small">Time since first alert</div><div class="timer" id="simClock">${clock(s.t)}</div></div>
-        <div style="text-align:right">${sevChip(s.sev)}<div class="small muted mt">${h(s.code)} · ${h(s.line)}</div></div></div>
+        <div style="text-align:right">${sevChip(s.sev)}<div class="small muted mt">${h(s.code)} · ${h(s.line)}${A ? ' · ' + A.id : ''}</div></div></div>
         <div id="simMs" class="mt"></div>
         <div class="row mt"><button class="btn primary" id="simFinish" onclick="finishSim()">Close case and add to log</button><span class="small muted">Tap each milestone when it happens. Steps can be marked in any order.</span></div>`)}
-      ${card('Tutorial for this case', `<div class="tut">${(LIBRARY.find(x => x.code === s.code) || LIBRARY[0]).steps.map((st, i) => `<div class="ts" style="cursor:default"><div class="tn">${i + 1}</div><div><div class="tt">${h(st[0])}</div><div class="td">${h(st[1])}</div></div></div>`).join('')}</div>`)}
+      ${card('Manual book for this case · ' + h(s.code) + ' v' + (LIBRARY.find(x => x.code === s.code) || LIBRARY[0]).ver, `<div class="tut">${(LIBRARY.find(x => x.code === s.code) || LIBRARY[0]).steps.map((st, i) => `<div class="ts" style="cursor:default"><div class="tn">${i + 1}</div><div><div class="tt">${h(st[0])}</div><div class="td">${h(st[1])}</div></div></div>`).join('')}</div>`)}
     </div>
   </div>`;
 };
@@ -380,7 +408,8 @@ function finishSim() {
   const T = SEVERITY[s.sev].t;
   const ack = s.done.ack != null ? s.done.ack : s.t, restore = s.done.restore != null ? s.done.restore : s.t;
   const within = MILESTONES.every(([k]) => T[k] == null || (s.done[k] != null && s.done[k] <= T[k]));
-  LOG.unshift({ id: 'AB-' + (1241 + LOG.filter(x => x.sim).length), time: new Date().toISOString(), line: s.line, code: s.code, sev: s.sev, ack: +ack.toFixed(1), restore: Math.round(restore), within, status: 'Closed', sim: true });
+  LOG.unshift({ id: s.alert ? s.alert.id : 'AB-' + (1241 + LOG.filter(x => x.sim).length), time: new Date().toISOString(), line: s.line, code: s.code, sev: s.sev, ack: +ack.toFixed(1), restore: Math.round(restore), within, status: 'Closed', sim: !s.alert, live: !!s.alert });
+  if (s.alert) { const al = ALERTS.find(x => x.id === s.alert.id); if (al) { al.status = 'Closed'; al.label = 'Confirmed ' + s.sev; } LABELS.push({ id: s.alert.id, label: 'Confirmed defect', at: Date.now() }); saveInteg(); }
   store.set('log', LOG);
   stopTimer();
   toast(within ? 'Closed within all targets. Added to the log.' : 'Closed with missed targets. Added to the log.');
@@ -395,11 +424,12 @@ PAGES.training = () => {
   if (i >= QUIZ.length) {
     const score = ans.filter((a, k) => a === QUIZ[k].a).length, pass = score >= 6;
     if (best == null || score > best) store.set('best_' + ROLE, score);
+    if (pass && !STATE.quizCounted) { const pk = PKGS.find(x => x.stage === 3 && x.trained < x.people); if (pk) { pk.trained++; saveInteg(); } STATE.quizCounted = true; }
     return pageHead('Training & quiz', 'Scenario questions based on the SOP, tutorials, and targets.') +
     card('Your result', `<div class="row" style="gap:24px;align-items:center"><div class="score">${score}/${QUIZ.length}</div><div>${pass ? 'You passed. You know the standard response.' : 'Not yet. Review the tutorials and the target matrix, then try again.'}</div></div>
       ${pass ? `<div class="cert mt"><b>Abnormality Response, Level 1</b><div class="small muted">${h(LANES[ROLE].name)} · ${new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}</div><div class="small mt">Pass mark 6 of 8. Refresher every 6 months, or after a tutorial changes.</div></div>` : ''}
       <div class="mt">${QUIZ.map((q, k) => `<div class="small" style="padding:6px 0;border-bottom:1px solid var(--line)">${ans[k] === q.a ? '✓' : '✗'} ${h(q.q)} <span class="muted">${h(q.e)}</span></div>`).join('')}</div>
-      <div class="row mt"><button class="btn primary" onclick="STATE.quizI=0;STATE.quizAns=[];refresh()">Try again</button></div>`);
+      <div class="row mt"><button class="btn primary" onclick="STATE.quizI=0;STATE.quizAns=[];STATE.quizCounted=false;refresh()">Try again</button></div>`);
   }
   const q = QUIZ[i], a = ans[i];
   return pageHead('Training & quiz', 'Eight scenario questions. Pass mark 6 of 8.', best != null ? `<span class="badge b-green">Best score ${best}/${QUIZ.length}</span>` : '') +
@@ -425,7 +455,7 @@ PAGES.log = () => {
     ${card('Cases by abnormality type', '<div style="height:240px"><canvas id="cType" role="img" aria-label="Bar chart of the number of cases for each abnormality type"></canvas></div>')}
   </div>
   ${card('Case log', `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>ID</th><th>Time</th><th>Line</th><th>Type</th><th>Severity</th><th class="r">Acknowledge</th><th class="r">Restore</th><th>Target</th><th>Status</th></tr></thead>
-    <tbody>${LOG.slice(0, 40).map(x => `<tr><td>${h(x.id)}${x.sim ? ' <span class="badge">drill</span>' : ''}</td><td>${new Date(x.time).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}</td><td>${h(x.line)}</td><td><span class="code">${x.code}</span></td><td>${sevChip(x.sev)}</td>
+    <tbody>${LOG.slice(0, 40).map(x => `<tr><td>${h(x.id)}${x.sim ? ' <span class="badge">drill</span>' : ''}${x.live ? ' <span class="badge b-blue">from Solution 1</span>' : ''}</td><td>${new Date(x.time).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}</td><td>${h(x.line)}</td><td><span class="code">${x.code}</span></td><td>${sevChip(x.sev)}</td>
       <td class="r">${x.ack} min</td><td class="r">${x.status === 'Open' ? '<span class="muted">open</span>' : fmtMin(x.restore)}</td><td>${x.status === 'Open' ? '<span class="badge b-amber">In progress</span>' : x.within ? '<span class="badge b-green">Met</span>' : '<span class="badge b-red">Missed</span>'}</td><td>${h(x.status)}</td></tr>`).join('')}</tbody></table></div>`)}`;
 };
 function drawCharts() {
@@ -445,9 +475,191 @@ function downloadCSV() {
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'abnormality-response-log.csv'; a.click();
 }
 
+/* =========================================================
+   Integration: Solution 1 → 2 (alert stream) and Solution 3 → 2 (line change packages)
+   In production these arrive through the platform API; here they are simulated.
+   ========================================================= */
+let ALERTS = [], LABELS = [], PKGS = [], alertSeq = 5121, genTimer = null;
+const BASE_LIB = JSON.parse(JSON.stringify(LIBRARY));
+const ageMin = a => (Date.now() - a.raised) / 60000;
+function saveInteg() { store.set('alerts', ALERTS); store.set('labels', LABELS); store.set('pkgs', PKGS.map(p => ({ id: p.id, stage: p.stage, trained: p.trained, order: p.order, extra: p.extra ? p : null }))); store.set('alertSeq', alertSeq); updateBadges(); }
+function makeAlert(tplIdx, minsAgo) {
+  const t = AI_ALERT_TEMPLATES[tplIdx % AI_ALERT_TEMPLATES.length];
+  return Object.assign({ id: 'AL-' + (alertSeq++), raised: Date.now() - (minsAgo || 0) * 60000, status: 'New', tpl: tplIdx % AI_ALERT_TEMPLATES.length }, t);
+}
+function initInteg() {
+  ALERTS = store.get('alerts', null); LABELS = store.get('labels', []); alertSeq = store.get('alertSeq', 5121);
+  if (!ALERTS) { ALERTS = [makeAlert(0, 0.4), makeAlert(1, 1.6), makeAlert(3, 7)]; }
+  const saved = store.get('pkgs', null);
+  PKGS = PKG_BASE.map((p, i) => Object.assign(JSON.parse(JSON.stringify(p)), { order: 100 - i }));
+  if (saved) saved.forEach(sv => {
+    let p = PKGS.find(x => x.id === sv.id);
+    if (!p && sv.extra) { p = sv.extra; PKGS.push(p); }
+    if (p) { p.stage = sv.stage; p.trained = sv.trained; p.order = sv.order; }
+  });
+  rebuildLibrary();
+  clearInterval(genTimer);
+  genTimer = setInterval(() => {
+    if (!ROLE) return;
+    if (ALERTS.filter(x => x.status === 'New').length >= 6) return;
+    const a = makeAlert(Math.floor(Math.random() * AI_ALERT_TEMPLATES.length), 0);
+    ALERTS.unshift(a); saveInteg();
+    toast('New alert from Solution 1: ' + a.code + ' · ' + a.station);
+    if (PAGE === 'alerts' || PAGE === 'home') refresh();
+  }, 45000);
+  setInterval(() => { if (ROLE) { updateBadges(); if (PAGE === 'alerts') tickAlerts(); } }, 1000);
+}
+/* Apply every published package to the manual book, oldest first */
+function rebuildLibrary() {
+  BASE_LIB.forEach((b, i) => { const L = LIBRARY[i]; L.steps = b.steps.map(x => x.slice()); L.signs = b.signs.slice(); L.ver = b.ver; L.upd = null; L.changed = {}; });
+  PKGS.filter(p => p.stage >= 2).sort((a, b) => a.order - b.order).forEach(p => {
+    const touched = new Set();
+    p.changes.forEach(c => {
+      const L = LIBRARY.find(x => x.code === c.code); if (!L) return;
+      if (c.type === 'step') { L.steps[c.idx] = [c.title, c.text]; L.changed[c.idx] = p.id; }
+      if (c.type === 'sign' && !L.signs.includes(c.text)) L.signs.push(c.text);
+      touched.add(L);
+    });
+    touched.forEach(L => { const [M, m] = L.ver.split('.').map(Number); L.ver = M + '.' + (m + 1); L.upd = p.id; });
+  });
+}
+function updateBadges() {
+  const n = ALERTS.filter(x => x.status === 'New').length, late = ALERTS.some(x => x.status === 'New' && ageMin(x) > SEVERITY[x.sev].t.ack);
+  const e = document.getElementById('nb-alerts'); if (e) { e.textContent = n || ''; e.className = 'nav-badge' + (late ? ' late' : ''); }
+  const k = PKGS.filter(x => x.stage < 4).length, f = document.getElementById('nb-sync'); if (f) f.textContent = k || '';
+}
+
+/* ---------- Live Alerts page (Solution 1 → 2) ---------- */
+PAGES.alerts = () => {
+  const open = ALERTS.filter(x => x.status === 'New'), inResp = ALERTS.filter(x => x.status === 'In response'), done = ALERTS.filter(x => x.status === 'Closed' || x.status === 'False alarm');
+  const acks = ALERTS.filter(x => x.ackMin != null).map(x => x.ackMin);
+  return pageHead('Live alerts from Solution 1', 'Every detection from the AI on SCADA data lands here with its alert code. Respond opens the SOP path, manual book page, and targets for that code.',
+    `<button class="btn sm" onclick="ALERTS.unshift(makeAlert(Math.floor(Math.random()*AI_ALERT_TEMPLATES.length),0));saveInteg();refresh()">Simulate a new detection</button>`) +
+  `<div class="grid g4">${kpi('Waiting for acknowledgement', open.length, 'Clock runs from the AI detection')}${kpi('Past acknowledge target', `<span id="kLate">${open.filter(x => ageMin(x) > SEVERITY[x.sev].t.ack).length}</span>`, 'Escalated one level up automatically')}${kpi('Avg time to acknowledge', acks.length ? (acks.reduce((a, b) => a + b, 0) / acks.length).toFixed(1) + ' min' : 'n/a', 'Alerts handled in this demo')}${kpi('Labels sent to Solution 1', LABELS.length, 'Confirmed defects and false alarms retrain the AI')}</div>` +
+  card('Incoming alerts', open.length ? open.map(alertRow).join('') : '<div class="empty">No alerts waiting. New detections arrive about every 45 seconds, or use Simulate a new detection.</div>', `<span class="small muted">Live · newest first</span>`) +
+  (inResp.length ? card('In response', inResp.map(a => `<div class="al"><div class="al-l"><span class="code">${a.code}</span><div><b>${h(a.msg)}</b><div class="small muted">${a.id} · ${h(a.station)}</div></div></div><div class="row">${sevChip(a.sev)}<button class="btn sm" onclick="resumeAlert('${a.id}')">Open workspace</button></div></div>`).join('')) : '') +
+  (done.length ? card('Closed and labelled', `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Alert</th><th>Detection</th><th>Station</th><th>Label sent to Solution 1</th></tr></thead><tbody>${done.slice(0, 12).map(a => `<tr><td>${a.id}</td><td><span class="code">${a.code}</span> ${h(a.msg)}</td><td>${h(a.station)}</td><td>${a.status === 'False alarm' ? '<span class="badge">False alarm · ' + h(a.reason || '') + '</span>' : '<span class="badge b-green">' + h(a.label || 'Confirmed') + '</span>'}</td></tr>`).join('')}</tbody></table></div>`) : '');
+};
+function alertRow(a) {
+  const T = SEVERITY[a.sev].t, L = LIBRARY.find(x => x.code === a.code);
+  return `<div class="al" id="al-${a.id}">
+    <div class="al-l"><span class="code">${a.code}</span><div>
+      <b>${h(a.msg)}</b>
+      <div class="small muted">${a.id} · ${h(a.station)} · ${h(a.src)}</div>
+      <div class="small" style="margin-top:3px">${h(a.metric)} · AI confidence <b>${a.conf}%</b></div>
+      <div class="small muted" style="margin-top:3px">Opens: SOP path ${a.sev} · Manual book ${a.code} v${L ? L.ver : ''} · targets ack ≤ ${fmtMin(T.ack)}, TL ≤ ${fmtMin(T.tl)}</div>
+    </div></div>
+    <div class="al-r">
+      <div class="row" style="justify-content:flex-end"><span class="small muted">AI suggests</span>${sevChip(a.sev)}</div>
+      <div class="al-clock" data-raised="${a.raised}" data-ack="${T.ack}">${clock(ageMin(a))}</div>
+      <div class="row" style="justify-content:flex-end">
+        <button class="btn sm" onclick="falseAlarm('${a.id}')">False alarm</button>
+        <button class="btn sm primary" onclick="respondAlert('${a.id}')">Acknowledge and respond</button></div>
+    </div></div>`;
+}
+function tickAlerts() {
+  let late = 0;
+  document.querySelectorAll('.al-clock').forEach(el => {
+    const m = (Date.now() - +el.dataset.raised) / 60000, t = +el.dataset.ack;
+    el.textContent = clock(m) + (m > t ? ' · past target, escalated' : '');
+    el.className = 'al-clock' + (m > t ? ' late' : m > t * 0.8 ? ' risk' : '');
+    if (m > t) late++;
+  });
+  const k = document.getElementById('kLate'); if (k) k.textContent = late;
+}
+function respondAlert(id) {
+  const a = ALERTS.find(x => x.id === id); if (!a) return;
+  const m = ageMin(a);
+  a.status = 'In response'; a.ackMin = +m.toFixed(1);
+  stopTimer();
+  STATE.sim = newSim(a.code, a.sev); STATE.sim.line = a.line; STATE.sim.t = m;
+  STATE.sim.alert = { id: a.id, msg: a.msg, station: a.station, src: a.src, metric: a.metric, conf: a.conf, aiSev: a.sev };
+  STATE.sim.feed = [{ t: 0, m: `Solution 1 raised ${a.id}: ${a.msg} (${a.station}).` }];
+  STATE.sim.done.ack = m;
+  STATE.sim.feed.unshift({ t: m, m: `Alert acknowledged (${m <= SEVERITY[a.sev].t.ack ? 'within target' : 'late'}). Manual book ${a.code} and SOP path ${a.sev} opened.` });
+  saveInteg(); go('simulator'); runSim();
+}
+function resumeAlert(id) { if (STATE.sim && STATE.sim.alert && STATE.sim.alert.id === id) return go('simulator'); const a = ALERTS.find(x => x.id === id); if (a) { a.status = 'New'; respondAlert(id); } }
+function falseAlarm(id) {
+  const a = ALERTS.find(x => x.id === id); if (!a) return;
+  const reasons = ['Lighting reflection', 'Sensor noise', 'Part within standard', 'Camera angle'];
+  a.status = 'False alarm'; a.reason = reasons[a.tpl % reasons.length]; a.ackMin = +ageMin(a).toFixed(1);
+  LABELS.push({ id: a.id, label: 'False alarm', at: Date.now() });
+  saveInteg(); toast(a.id + ' labelled as false alarm and sent back to Solution 1'); refresh();
+}
+function alertEvidence(A, s) {
+  return card('Alert from Solution 1 · ' + A.id, `<div class="ev">
+      <div class="ev-row"><span>Detection</span><b>${h(A.msg)}</b></div>
+      <div class="ev-row"><span>Station</span><b>${h(A.station)}</b></div>
+      <div class="ev-row"><span>Source</span><b>${h(A.src)}</b></div>
+      <div class="ev-row"><span>Evidence</span><b>${h(A.metric)}</b></div>
+      <div class="ev-row"><span>AI confidence</span><b>${A.conf}%</b></div>
+      <div class="ev-row"><span>AI suggested</span>${sevChip(A.aiSev)}</div></div>
+    <div class="field mt"><label for="sSev">Severity confirmed by the TL</label><select id="sSev" onchange="STATE.sim.sev=this.value;STATE.sim.feed.unshift({t:STATE.sim.t,m:'TL changed severity to '+this.value+'. Targets updated.'});refresh()">${Object.keys(SEVERITY).map(k => `<option value="${k}" ${k === s.sev ? 'selected' : ''}>${k} ${SEVERITY[k].name}</option>`).join('')}</select></div>
+    <div class="field"><label>Clock speed</label><div class="seg">${[1, 10, 60].map(v => `<button class="${STATE.simSpeed === v ? 'on' : ''}" onclick="STATE.simSpeed=${v};refresh()">${v === 1 ? 'Real time' : v + '× faster'}</button>`).join('')}</div></div>
+    <div class="row">${s.running ? `<button class="btn" onclick="pauseSim()">Pause</button>` : `<button class="btn primary" onclick="runSim()">Resume</button>`}<a class="btn" href="#swimlane" onclick="STATE.slSev='${s.sev}';go('swimlane')">See SOP path ${s.sev}</a></div>
+    <p class="small muted mt">Closing the case sends the label “Confirmed defect” back to Solution 1.</p>`);
+}
+
+/* ---------- Line Change Sync page (Solution 3 → 2) ---------- */
+PAGES.sync = () => {
+  const list = PKGS.slice().sort((a, b) => b.order - a.order);
+  const sel = list.find(x => x.id === STATE.pkgSel) || list.find(x => x.stage < 4) || list[0];
+  STATE.pkgSel = sel.id;
+  const next = PKG_NEXT.find(n => !PKGS.some(p => p.id === n.id));
+  return pageHead('Line change sync from Solution 3', 'When the digital twin validates a line change, Solution 3 sends a change package here. The manual book is updated and people are retrained before the change goes live.',
+    next ? `<button class="btn sm" onclick="receivePkg()">Receive next package from Solution 3</button>` : '') +
+  `<div class="grid g12">
+    ${card('Change packages', list.map(p => `<button class="pk ${p.id === sel.id ? 'on' : ''}" onclick="STATE.pkgSel='${p.id}';refresh()">
+        <div class="row" style="justify-content:space-between"><span class="code">${p.id}</span>${stageBadge(p)}</div>
+        <b>${h(p.title)}</b><span class="small muted">${h(p.area)} · ${p.daysAgo === 0 ? 'today' : p.daysAgo + ' days ago'}</span></button>`).join(''))}
+    <div>${pkgDetail(sel)}</div>
+  </div>`;
+};
+function stageBadge(p) { const c = p.stage >= 4 ? 'b-green' : p.stage >= 2 ? 'b-blue' : 'b-amber'; return `<span class="badge ${c}">${PKG_STAGES[p.stage]}</span>`; }
+function pkgDetail(p) {
+  const pct = Math.round(p.trained / p.people * 100), gate = pct >= 90;
+  const steps = `<div class="stages">${PKG_STAGES.map((st, i) => `<div class="stg ${i < p.stage ? 'done' : i === p.stage ? 'cur' : ''}"><span>${i < p.stage || p.stage === 4 ? '✓' : i + 1}</span>${st}</div>`).join('')}</div>`;
+  const diff = p.changes.map(c => {
+    const L = BASE_LIB.find(x => x.code === c.code), cur = LIBRARY.find(x => x.code === c.code);
+    const oldTxt = c.type === 'step' ? (p.stage >= 2 ? '' : cur.steps[c.idx][1]) : '';
+    return `<div class="df"><div class="row"><span class="code">${c.code}</span><b>${c.type === 'step' ? 'Step ' + (c.idx + 1) + ': ' + h(c.title) : 'New warning sign'}</b><span class="small muted">${h(L.name)}</span></div>
+      ${c.type === 'step' && oldTxt ? `<div class="df-old">− ${h(oldTxt)}</div>` : ''}<div class="df-new">+ ${h(c.text)}</div></div>`;
+  }).join('');
+  let action = '';
+  if (p.stage === 0) action = `<button class="btn primary" onclick="pkgNext('${p.id}')">Review impact on the manual book</button>`;
+  else if (p.stage === 1) action = `<button class="btn primary" onclick="pkgNext('${p.id}')">Approve and publish manual update</button><span class="small muted">Group Leader approval</span>`;
+  else if (p.stage === 2) action = `<button class="btn primary" onclick="pkgNext('${p.id}')">Assign refresher to ${p.people} people</button>`;
+  else if (p.stage === 3) action = `<button class="btn" onclick="pkgTrain('${p.id}')">Record 4 completions</button><a class="btn" href="#training" onclick="go('training')">Take the refresher quiz</a><button class="btn primary" ${gate ? '' : 'disabled'} onclick="pkgNext('${p.id}')">Release go-live to Solution 3</button><span class="small muted">${gate ? 'Gate passed' : 'Needs 90% trained'}</span>`;
+  else action = `<span class="badge b-green">Solution 3 notified: ${p.id} cleared for go-live</span>`;
+  return card(`<span class="code">${p.id}</span> ${h(p.title)}`, `${steps}
+    <div class="grid g2 flat mt">
+      <div><div class="sub-h">Digital twin result (Solution 3)</div><table class="tbl"><thead><tr><th>Measure</th><th>Before</th><th>After</th></tr></thead><tbody>${p.sim.map(r => `<tr><td>${h(r[0])}</td><td>${h(r[1])}</td><td><b>${h(r[2])}</b></td></tr>`).join('')}</tbody></table><p class="small muted mt">${h(p.note)}</p></div>
+      <div><div class="sub-h">Refresher</div><div class="cell-bar"><div class="progress lg"><span style="width:${p.stage >= 3 ? pct : 0}%;background:${gate ? C.green : C.amber}"></span></div><b>${p.stage >= 3 ? p.trained + '/' + p.people : 'Not assigned'}</b></div>
+        <p class="small muted mt">Affected operators and TLs in ${h(p.area)}. Go-live opens at 90% trained. Passing the quiz counts as one completion.</p></div>
+    </div>
+    <div class="sub-h mt" style="margin-top:16px">Manual book changes ${p.stage >= 2 ? '(published)' : p.stage === 1 ? '(proposed, review below)' : '(open after impact review)'}</div>
+    ${p.stage >= 1 ? diff : `<div class="callout">${p.changes.length} change${p.changes.length > 1 ? 's' : ''} detected in ${[...new Set(p.changes.map(c => c.code))].join(', ')}. Review the impact to see the exact edits.</div>`}
+    <div class="row mt">${action}</div>`);
+}
+function pkgNext(id) {
+  const p = PKGS.find(x => x.id === id); if (!p || p.stage >= 4) return;
+  p.stage++;
+  if (p.stage === 2) { p.order = Math.max(...PKGS.map(x => x.order)) + 1; rebuildLibrary(); toast('Manual book updated: ' + [...new Set(p.changes.map(c => c.code))].map(c => c + ' v' + LIBRARY.find(x => x.code === c).ver).join(', ')); }
+  if (p.stage === 4) toast('Go-live released. Solution 3 notified.');
+  saveInteg(); refresh();
+}
+function pkgTrain(id) { const p = PKGS.find(x => x.id === id); p.trained = Math.min(p.people, p.trained + 4); saveInteg(); refresh(); }
+function receivePkg() {
+  const n = PKG_NEXT.find(n => !PKGS.some(p => p.id === n.id)); if (!n) return;
+  const p = Object.assign(JSON.parse(JSON.stringify(n)), { daysAgo: 0, stage: 0, trained: 0, order: 0, extra: true });
+  PKGS.push(p); STATE.pkgSel = p.id; saveInteg(); toast('Package ' + p.id + ' received from Solution 3'); refresh();
+}
+
 /* ---------- Boot ---------- */
 window.addEventListener('hashchange', () => { const p = location.hash.replace('#', ''); if (ROLE && p !== PAGE && PAGES[p]) go(p); });
 afterQ = [];
 const _go = go;
-go = function (p, keep) { _go(p, keep); if (p === 'simulator') renderSimLive(); };
+go = function (p, keep) { _go(p, keep); if (p === 'simulator') renderSimLive(); if (p === 'alerts') tickAlerts(); updateBadges(); };
+initInteg();
 if (ROLE && LANES[ROLE]) enter(ROLE); else renderLanding();
